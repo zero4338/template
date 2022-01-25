@@ -2,17 +2,8 @@
 typedef long long ll;
 using namespace std;
 const int mod=998244353;
-int read()
-{
-	int ret=0;bool f=0;char c=getchar();
-	while(c>'9'||c<'0')f|=(c=='-'),c=getchar();
-	while(c>='0'&&c<='9')ret=((ll)ret*10+(c^48))%mod,c=getchar();
-	return f?-ret:ret;
-}
-const int maxn=1e5+5;
-int n,k;
-int inv[maxn];
-void prework(){inv[1]=1;for(int i=2;i<=n;i++)inv[i]=(ll)(mod-mod/i)*inv[mod%i]%mod;}
+int inv[1<<21];
+void prework(){inv[1]=1;for(int i=2;i<(1<<21);i++)inv[i]=(ll)(mod-mod/i)*inv[mod%i]%mod;}
 int qpow(int a,int b){int ret=1;for(;b;b>>=1,a=(ll)a*a%mod)if(b&1)ret=(ll)ret*a%mod;return ret;}
 int R[1<<21],W[1<<21];
 struct poly
@@ -43,20 +34,59 @@ struct poly
 	poly operator *(poly &x)
 	{
 		poly ret,tmp0=*this,tmp1=x;
-		int L=ceil(log2(len()+x.len()-1)),n=1<<L;
-		ntt(L,1);x.ntt(L,1);
+		int L=ceil(log2(tmp0.len()+tmp1.len()-1)),n=1<<L;
+		tmp0.ntt(L,1);tmp1.ntt(L,1);
 		ret.set(n);
-		for(int i=0;i<n;i++)ret[i]=(ll)v[i]*x[i]%mod;
-		ret.ntt(L,-1);ret.adjust();*this=tmp0;x=tmp1;
+		for(int i=0;i<n;i++)ret[i]=(ll)tmp0[i]*tmp1[i]%mod;
+		ret.ntt(L,-1);ret.adjust();
 		return ret;
+	}
+	poly operator +(poly &x)
+	{
+		poly ret;
+		ret.set(max(len(),x.len()));
+		for(int i=0;i<len();i++)ret[i]=v[i];
+		for(int i=0;i<x.len();i++)ret[i]=(ret[i]+x[i])%mod;
+		return ret;
+	}
+	void operator +=(poly &x)
+	{
+		if(len()<x.len())set(x.len());
+		for(int i=0;i<x.len();i++)v[i]=(v[i]+x[i]+mod)%mod;
+	}
+	poly operator -(poly &x)
+	{
+		poly ret;
+		ret.set(max(len(),x.len()));
+		for(int i=0;i<len();i++)ret[i]=v[i];
+		for(int i=0;i<x.len();i++)ret[i]=(ret[i]-x[i]+mod)%mod;
+		return ret;
+	}
+	void operator -=(poly &x)
+	{
+		if(len()<x.len())set(x.len());
+		for(int i=0;i<x.len();i++)v[i]=(v[i]-x[i]+mod)%mod;
 	}
 	void operator *=(poly &x)
 	{
 		poly tmp=x;
-		int L=ceil(log2(len()+x.len()-1)),n=1<<L;
-		ntt(L,1);x.ntt(L,1);
-		for(int i=0;i<n;i++)v[i]=(ll)v[i]*x[i]%mod;
-		ntt(L,-1);adjust();x=tmp;
+		int L=ceil(log2(len()+tmp.len()-1)),n=1<<L;
+		ntt(L,1);tmp.ntt(L,1);
+		for(int i=0;i<n;i++)v[i]=(ll)v[i]*tmp[i]%mod;
+		ntt(L,-1);adjust();
+	}
+	pair<poly,poly>operator %(poly &x)
+	{
+		if(x.len()>len())return {{{0}},*this};
+		poly tmp0=*this,tmp1=x;
+		reverse(tmp0.v.begin(),tmp0.v.end());
+		reverse(tmp1.v.begin(),tmp1.v.end());
+		tmp1=tmp1.getinv(len()-x.len()+1);
+		tmp0*=tmp1;tmp0.set(len()-x.len()+1);
+		reverse(tmp0.v.begin(),tmp0.v.end());
+		poly r=*this;
+		tmp1=tmp0*x;r=r-tmp1;r.set(x.len()-1);
+		return {tmp0,r};
 	}
 	poly getinv(int deg=-1)
 	{
@@ -65,7 +95,7 @@ struct poly
 		poly ret=getinv((deg+1)>>1);
 		int L=ceil(log2(deg))+1,n=1<<L;
 		poly tmp;tmp.set(deg);
-		for(int i=0;i<deg;i++)tmp[i]=v[i];
+		for(int i=0;i<min(len(),deg);i++)tmp[i]=v[i];
 		tmp.ntt(L,1);ret.ntt(L,1);
 		for(int i=0;i<n;i++)ret[i]=(ll)ret[i]*(2-(ll)tmp[i]*ret[i]%mod+mod)%mod;
 		ret.ntt(L,-1);ret.v.resize(deg);
@@ -102,7 +132,41 @@ struct poly
 		for(int &i:ln.v)i=(ll)i*k%mod;
 		return ln.getexp();
 	}
+	vector<int>multipointeval(vector<int>x)
+	{
+		static poly tmp[1<<21];
+		auto get=[&](int u,int l,int r)
+		{
+			function<void(int,int,int)>s;
+			s=[&](int u,int l,int r)
+			{
+				if(l==r){tmp[u]=poly{{mod-x[l],1}};return;}
+				int mid=(l+r)>>1;
+				s(u<<1,l,mid);s(u<<1|1,mid+1,r);
+				tmp[u]=tmp[u<<1]*tmp[u<<1|1];	
+			};
+			return s(u,l,r);
+		};
+		get(1,0,x.size()-1);
+		vector<int>ret;ret.resize(x.size());
+		auto solve=[&](int l,int r,poly f,int u)
+		{
+			function<void(int,int,poly,int)>s;
+			s=[&](int l,int r,poly f,int u)
+			{
+				if(l==r){ret[l]=f[0];return;}
+				int mid=(l+r)>>1;
+				s(l,mid,(f%tmp[u<<1]).second,u<<1);
+				s(mid+1,r,(f%tmp[u<<1|1]).second,u<<1|1);
+			};
+			return s(l,r,f,u);
+		};
+		solve(0,x.size()-1,(*this%tmp[1]).second,1);
+		return ret;
+	}
+	void print(){for(int &i:v)printf("%d ",i);putchar('\n');}
 };
 int main()
 {
+	
 }
